@@ -1,0 +1,9 @@
+{
+  "N": 1000,
+  "k1": 10,
+  "k2": 4,
+  "er_prob": 0.0075,
+  "physical_edges": 3797,
+  "info_edges": 12971,
+  "num_2simplices": 4041
+}
