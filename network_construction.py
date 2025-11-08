@@ -339,7 +339,7 @@ class MultiLayerSimplicialNetwork:
         
         plt.tight_layout()
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        print(f"\n  ✓ Visualization saved to: {save_path}")
+        print(f"\n  Visualization saved to: {save_path}")
         plt.show()
         
     @staticmethod
@@ -367,10 +367,10 @@ class MultiLayerSimplicialNetwork:
 
 def main():    
     network = MultiLayerSimplicialNetwork(
-        N=1000,      # Population size
-        k1=10,       # Average degree in information layer
-        k2=4,        # 2-simplices per node
-        er_prob=0.0075  # ER probability for physical layer
+        N=1200,      # Population size
+        k1=5,       # Average degree in information layer
+        k2=2,        # 2-simplices per node
+        er_prob=0.006  # ER probability for physical layer
     )
     
     # Build adjacency structures for simulation
