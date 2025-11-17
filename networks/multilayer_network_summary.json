@@ -1,9 +1,9 @@
 {
-  "N": 1200,
-  "k1": 5,
-  "k2": 2,
+  "N": 1000,
+  "k1": 4,
+  "k2": 1,
   "er_prob": 0.005,
-  "physical_edges": 3585,
-  "info_edges": 7984,
-  "num_2simplices": 2468
+  "physical_edges": 2482,
+  "info_edges": 3960,
+  "num_2simplices": 993
 }

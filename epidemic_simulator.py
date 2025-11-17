@@ -45,9 +45,9 @@ class NodeState:
         initial_aware_nodes = np.random.choice(N, initial_aware_count, replace=False)
         self.awareness_states[initial_aware_nodes] = 'A'
         
-        # Start with 5 exposed (and unaware)
+        # Start with 15 exposed (and unaware)
         unaware_nodes = np.where(self.awareness_states == 'U')[0]
-        seed_nodes = np.random.choice(unaware_nodes, size=min(5, len(unaware_nodes)), replace=False)
+        seed_nodes = np.random.choice(unaware_nodes, size=min(15, len(unaware_nodes)), replace=False)
         self.disease_states[seed_nodes] = 'E'
         
         # Track time in each disease state
@@ -293,6 +293,13 @@ class EpidemicSimulator:
         self.current_lockdown_level = action
         transmission_multiplier = self.lockdown_multipliers[action]
         
+        R_nodes = np.where(self.state.disease_states == 'R')[0]
+        waning_rate = 0.007  # chance per day to lose immunity
+        
+        for i in R_nodes:
+            if np.random.rand() < waning_rate:
+                self.state.disease_states[i] = 'S'  # Back to susceptible
+
         # 1. Awareness dynamics (information layer)
         self._update_awareness_spread()
         
@@ -662,13 +669,23 @@ def main():
             'lambda_u': 0.2,       
             'lambda_delta': 0.4,    
             'delta': 0.6          
+        },
+        'long_duration': {
+            'beta0': 0.04,           # LOWER transmission (was 0.10)
+            'mu': 0.1,              # SLOWER incubation: E→I (was 0.2)
+            'gamma_r': 1/14,         # SLOWER recovery: ~18 days (was 1/10)
+            'mortality_rate': 0.0165,  # LOWER mortality (was 0.02)
+            'gamma_a': 0.7,          # STRONGER awareness protection (was 0.3)
+            'lambda_u': 0.15,        # MODERATE pairwise awareness spread (was 0.2)
+            'lambda_delta': 0.25,     # MODERATE group awareness (was 0.4)
+            'delta': 0.35             # SLOWER forgetting (was 0.6)
         }
     }
     # Based on the proposal:
-    sim_params = scenarios['realistic']
+    sim_params = scenarios['long_duration']
     
     # --- 3. Run Baseline Simulation ---
-    run_simulation(network_data, sim_params, max_days=500)
+    run_simulation(network_data, sim_params, max_days=1000)
     
 
 if __name__ == "__main__":

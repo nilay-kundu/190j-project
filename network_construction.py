@@ -367,9 +367,9 @@ class MultiLayerSimplicialNetwork:
 
 def main():    
     network = MultiLayerSimplicialNetwork(
-        N=1200,      # Population size
-        k1=5,       # Average degree in information layer
-        k2=2,        # 2-simplices per node
+        N=1000,      # Population size
+        k1=4,       # Average degree in information layer
+        k2=1,        # 2-simplices per node
         er_prob=0.005  # ER probability for physical layer
     )
     
