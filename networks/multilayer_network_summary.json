@@ -2,8 +2,8 @@
   "N": 1200,
   "k1": 5,
   "k2": 2,
-  "er_prob": 0.006,
-  "physical_edges": 4228,
-  "info_edges": 7920,
-  "num_2simplices": 2443
+  "er_prob": 0.005,
+  "physical_edges": 3585,
+  "info_edges": 7984,
+  "num_2simplices": 2468
 }

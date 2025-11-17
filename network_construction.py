@@ -370,7 +370,7 @@ def main():
         N=1200,      # Population size
         k1=5,       # Average degree in information layer
         k2=2,        # 2-simplices per node
-        er_prob=0.006  # ER probability for physical layer
+        er_prob=0.005  # ER probability for physical layer
     )
     
     # Build adjacency structures for simulation
