@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 ---
 
-## 📋 Overview
+## Overview
 
 The COVID-19 pandemic revealed that epidemic dynamics are fundamentally shaped by the **co-evolution of disease transmission and public awareness**. Traditional epidemic models fail to capture group-level social structures that characterize real-world contact patterns.
 
@@ -19,7 +19,7 @@ This project combines:
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Installation
 ```bash
