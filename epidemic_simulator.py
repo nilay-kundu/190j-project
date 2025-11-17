@@ -1,11 +1,12 @@
 """
-Step 2: Epidemic Simulator
+Step 2: Epidemic Simulator (Refactored)
 Implements SEIRD + UAU dynamics on multilayer simplicial network
-Improvements:
-- Stochastic incubation periods
-- Variable recovery times
+
+Key improvements:
+- Organized parameter management
+- Stochastic incubation and recovery periods
+- Waning immunity (SEIRS model)
 - Realistic transmission probabilities
-- Better state tracking
 - Comprehensive visualization
 
 Runtime: ~5-10 minutes for 300-day simulation
@@ -15,14 +16,85 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-from collections import defaultdict
 import pickle
-import json
-from tqdm import tqdm
+from collections import defaultdict
 
 # Set style
 sns.set_style("whitegrid")
 plt.rcParams['figure.figsize'] = (15, 10)
+
+
+# ==============================================================================
+# PARAMETER CONFIGURATION
+# ==============================================================================
+
+class SimulationParams:
+    """Centralized parameter configuration"""
+    
+    # Available scenarios
+    SCENARIOS = {
+        'extreme': {
+            'beta0': 1.0,
+            'mu': 0.1,
+            'gamma_r': 1/40,
+            'mortality_rate': 0.5,
+            'gamma_a': 0.0,
+            'lambda_u': 0.1,
+            'lambda_delta': 0.25,
+            'delta': 0.7,
+            'waning_rate': 0.00725,
+            'lockdown_action': 0
+        },
+        'realistic': {
+            'beta0': 0.10,
+            'mu': 0.2,
+            'gamma_r': 1/10,
+            'mortality_rate': 0.02,
+            'gamma_a': 0.3,
+            'lambda_u': 0.2,
+            'lambda_delta': 0.4,
+            'delta': 0.6,
+            'waning_rate': 0.00725,
+            'lockdown_action': 0
+        },
+        'long_duration': {
+            'beta0': 0.04,
+            'mu': 0.1,
+            'gamma_r': 1/14,
+            'mortality_rate': 0.0165,
+            'gamma_a': 0.6,
+            'lambda_u': 0.15,
+            'lambda_delta': 0.25,
+            'delta': 0.45,
+            'waning_rate': 0.00725,
+            'lockdown_action': 1
+        }
+    }
+    
+    # Lockdown settings
+    LOCKDOWN_MULTIPLIERS = {
+        0: 1.0,   # No restrictions
+        1: 0.75,  # Social distancing (25% reduction)
+        2: 0.3    # Full lockdown (70% reduction)
+    }
+    
+    ECONOMY_LEVELS = {
+        0: 1.0,   # Full economy
+        1: 0.75,  # 75% economy
+        2: 0.30   # 30% economy
+    }
+    
+    # Initial conditions
+    INITIAL_AWARE_PERCENT = 0.01  # 1% initially aware
+    INITIAL_EXPOSED_COUNT = 15     # Number of seed infections
+    
+    @classmethod
+    def get_scenario(cls, name='realistic'):
+        """Get parameter set for a scenario"""
+        if name not in cls.SCENARIOS:
+            raise ValueError(f"Unknown scenario: {name}. Available: {list(cls.SCENARIOS.keys())}")
+        return cls.SCENARIOS[name].copy()
+
 
 # ==============================================================================
 # NODE AND STATE MANAGEMENT
@@ -40,44 +112,50 @@ class NodeState:
         # Awareness states: U (Unaware), A (Aware), R (Removed/Dead)
         self.awareness_states = np.full(N, 'U', dtype='<U1')
         
-        # Initialize 1% aware
-        initial_aware_count = max(1, int(N * 0.01))
+        # Initialize aware population
+        initial_aware_count = max(1, int(N * SimulationParams.INITIAL_AWARE_PERCENT))
         initial_aware_nodes = np.random.choice(N, initial_aware_count, replace=False)
         self.awareness_states[initial_aware_nodes] = 'A'
         
-        # Start with 15 exposed (and unaware)
+        # Seed initial infections (exposed, unaware)
         unaware_nodes = np.where(self.awareness_states == 'U')[0]
-        seed_nodes = np.random.choice(unaware_nodes, size=min(15, len(unaware_nodes)), replace=False)
+        seed_count = min(SimulationParams.INITIAL_EXPOSED_COUNT, len(unaware_nodes))
+        seed_nodes = np.random.choice(unaware_nodes, size=seed_count, replace=False)
         self.disease_states[seed_nodes] = 'E'
         
-        # Track time in each disease state
+        # Timers for disease progression
         self.incubation_timer = np.zeros(N, dtype=int)  # Days in E state
         self.infection_timer = np.zeros(N, dtype=int)   # Days in I state
         
-        # Set individual incubation periods (1-5 days, more realistic)
+        # Set random incubation periods (1-5 days)
         for node in seed_nodes:
             self.incubation_timer[node] = np.random.randint(1, 6)
         
         self.update_counts()
     
     def update_counts(self):
-        """Update population counts"""
+        """Update all population counts"""
+        # Basic disease states
         self.counts = {
             'S': np.sum(self.disease_states == 'S'),
             'E': np.sum(self.disease_states == 'E'),
             'I': np.sum(self.disease_states == 'I'),
             'R': np.sum(self.disease_states == 'R'),
             'D': np.sum(self.disease_states == 'D'),
-            'U': np.sum(self.awareness_states == 'U'),
-            'A': np.sum(self.awareness_states == 'A'),
         }
+        
+        # Awareness states
+        self.counts['U'] = np.sum(self.awareness_states == 'U')
+        self.counts['A'] = np.sum(self.awareness_states == 'A')
         
         # Combined states
         self.counts['AS'] = np.sum((self.awareness_states == 'A') & (self.disease_states == 'S'))
         self.counts['US'] = np.sum((self.awareness_states == 'U') & (self.disease_states == 'S'))
         self.counts['AI'] = np.sum((self.awareness_states == 'A') & (self.disease_states == 'I'))
         self.counts['UI'] = np.sum((self.awareness_states == 'U') & (self.disease_states == 'I'))
-        self.counts['Active'] = self.counts['I'] # ONLY INFECTIOUS (I) COUNTED AS ACTIVE
+        
+        # Derived metrics
+        self.counts['Active'] = self.counts['I']  # Only infectious counted as active
         self.counts['Aware_Density'] = self.counts['A'] / self.N
 
 
@@ -86,46 +164,37 @@ class NodeState:
 # ==============================================================================
 
 class EpidemicSimulator:
-    """
-    Simulates epidemic dynamics on multilayer simplicial network
-    """
+    """Simulates epidemic dynamics on multilayer simplicial network"""
     
     def __init__(self, network_data, params):
         self.N = network_data['N']
         self.network_data = network_data
         
         # === DISEASE PARAMETERS ===
-        self.beta0 = params.get('beta0', 0.15)        # Base infection rate
-        self.mu = params.get('mu', 0.4)              # Incubation rate (E→I)
-        self.gamma_r = params.get('gamma_r', 1/21)   # Recovery rate (I→R)
-        self.mortality_rate = params.get('mortality_rate', 0.02) # Death probability
-        self.gamma_a = params.get('gamma_a', 0.3)     # Awareness protection factor
+        self.beta0 = params['beta0']                    # Base infection rate
+        self.mu = params['mu']                          # Incubation rate (E→I)
+        self.gamma_r = params['gamma_r']                # Recovery rate (I→R)
+        self.mortality_rate = params['mortality_rate']  # Death probability
+        self.gamma_a = params['gamma_a']                # Awareness protection factor
+        self.waning_rate = params['waning_rate']        # Immunity waning rate (R→S)
         
         # === AWARENESS PARAMETERS ===
-        self.lambda_u = params.get('lambda_u', 0.1)           # 1-simplex awareness spread
-        self.lambda_delta = params.get('lambda_delta', 0.6)  # 2-simplex awareness spread
-        self.delta = params.get('delta', 0.8)                # Forgetting rate
+        self.lambda_u = params['lambda_u']              # 1-simplex awareness spread
+        self.lambda_delta = params['lambda_delta']      # 2-simplex awareness spread
+        self.delta = params['delta']                    # Forgetting rate
         
-        # === LOCKDOWN MECHANICS ===
+        # === POLICY PARAMETERS ===
+        self.lockdown_multipliers = SimulationParams.LOCKDOWN_MULTIPLIERS
+        self.economy_levels = SimulationParams.ECONOMY_LEVELS
         self.current_lockdown_level = 0
-        self.lockdown_multipliers = {
-            0: 1.0,   # No restrictions
-            1: 0.75,  # Social distancing (25% reduction)
-            2: 0.25   # Full lockdown (75% reduction)
-        }
-        self.economy_levels = {
-            0: 1.0,   # Full economy
-            1: 0.75,  # 75% economy
-            2: 0.25   # 25% economy
-        }
         
         # === NETWORK STRUCTURE ===
         self.adj_phys = network_data['adjacency_list_physical']
         self.adj_info = network_data['adjacency_list_info']
         self.adj_triangles = network_data['adjacency_triangles_list']
         
-        # Calculate actual λ* for 2-simplices (Fan et al. Eq 2.3)
-        total_triangles = len(network_data.get('simplices_2', [])) # Use .get for robustness
+        # Calculate effective λ* for 2-simplices (Fan et al. Eq 2.3)
+        total_triangles = len(network_data.get('simplices_2', []))
         k2_avg = 3 * total_triangles / self.N
         self.lambda_star = self.lambda_delta * self.delta / k2_avg if k2_avg > 0 else 0
         
@@ -136,47 +205,71 @@ class EpidemicSimulator:
         self.cumulative_deaths = 0
         self.cumulative_infections = 0
         
+        self._print_initialization()
+    
+    def _print_initialization(self):
+        """Print simulation configuration"""
         print(f"\n{'='*60}")
         print("EPIDEMIC SIMULATOR INITIALIZED")
         print(f"{'='*60}")
         print(f"Population: {self.N}")
-        print(f"\nDisease Parameters (SEVERE BASELINE):")
+        
+        print(f"\nDisease Parameters:")
         print(f"  β₀ (base transmission): {self.beta0:.3f}")
         print(f"  μ (incubation rate): {self.mu:.3f} → avg {1/self.mu:.1f} days")
         print(f"  γᵣ (recovery rate): {self.gamma_r:.4f} → avg {1/self.gamma_r:.1f} days")
         print(f"  Mortality rate: {self.mortality_rate:.1%}")
+        print(f"  Waning immunity: {self.waning_rate:.5f} per day → avg {1/self.waning_rate:.0f} days")
         print(f"  γₐ (awareness protection): {self.gamma_a:.2f} → {(1-self.gamma_a)*100:.0f}% reduction")
+        
         print(f"\nAwareness Parameters:")
         print(f"  λ (1-simplex spread): {self.lambda_u:.3f}")
         print(f"  λ_δ (2-simplex param): {self.lambda_delta:.3f}")
         print(f"  λ* (effective 2-simplex): {self.lambda_star:.4f}")
         print(f"  δ (forgetting rate): {self.delta:.3f} → avg {1/self.delta:.1f} days")
+        
+        print(f"\nPolicy Options:")
+        print(f"  Lockdown levels: {list(self.lockdown_multipliers.keys())}")
+        print(f"  Contact reductions: {[f'{(1-v)*100:.0f}%' for v in self.lockdown_multipliers.values()]}")
         print(f"{'='*60}\n")
     
+    # ==========================================================================
+    # DISEASE DYNAMICS
+    # ==========================================================================
+    
+    def _update_waning_immunity(self):
+        """Handle R → S transitions (waning immunity)"""
+        R_nodes = np.where(self.state.disease_states == 'R')[0]
+        
+        for i in R_nodes:
+            if np.random.rand() < self.waning_rate:
+                self.state.disease_states[i] = 'S'
+    
     def _update_disease_spread(self, transmission_multiplier):
-        """Handles S→E and E→I transitions with stochastic timing"""
+        """Handle S→E and E→I transitions"""
         new_infections = 0
         
-        # === 1. E → I (Incubation Completion) ===
+        # === E → I (Incubation completion) ===
         E_nodes = np.where(self.state.disease_states == 'E')[0]
         
         for i in E_nodes:
-            # Decrement timer. If <= 0, transition to Infectious
             self.state.incubation_timer[i] -= 1
+            
             if self.state.incubation_timer[i] <= 0:
                 self.state.disease_states[i] = 'I'
                 
-                # Set infectious duration (based on inverse of gamma_r)
-                # Note: We use a stochastic timer, overriding the fixed gamma_r probability
+                # Set infectious duration (stochastic around mean)
                 avg_recovery_time = 1 / self.gamma_r
-                # Set duration as a random integer around the mean recovery time
-                self.state.infection_timer[i] = max(1, np.random.randint(int(avg_recovery_time * 0.7), int(avg_recovery_time * 1.3) + 1))
+                self.state.infection_timer[i] = max(1, np.random.randint(
+                    int(avg_recovery_time * 0.7), 
+                    int(avg_recovery_time * 1.3) + 1
+                ))
                 
-                # Infected nodes become spontaneously aware
-                if self.state.awareness_states[i] != 'R':  # Not dead
+                # Infected individuals become spontaneously aware
+                if self.state.awareness_states[i] != 'R':
                     self.state.awareness_states[i] = 'A'
         
-        # === 2. S → E (New Infections) ===
+        # === S → E (New infections) ===
         S_nodes = np.where(self.state.disease_states == 'S')[0]
         
         # Calculate effective transmission rates
@@ -184,23 +277,22 @@ class EpidemicSimulator:
         beta_A = self.gamma_a * beta_U                 # Aware susceptible
         
         for i in S_nodes:
-            # Find infectious neighbors in PHYSICAL layer
+            # Find infectious neighbors in physical layer
             I_neighbors = [j for j in self.adj_phys[i] 
-                           if self.state.disease_states[j] == 'I']
+                          if self.state.disease_states[j] == 'I']
             
             if not I_neighbors:
                 continue
             
-            # Choose effective beta based on awareness
+            # Select transmission rate based on awareness
             beta_eff = beta_A if self.state.awareness_states[i] == 'A' else beta_U
             
-            # Probability of infection from ANY neighbor
+            # Probability of infection from any neighbor
             prob_infection = 1 - (1 - beta_eff) ** len(I_neighbors)
-            prob_infection = min(prob_infection, 0.9) # Cap at 90%
+            prob_infection = min(prob_infection, 0.9)  # Cap at 90%
             
             if np.random.rand() < prob_infection:
                 self.state.disease_states[i] = 'E'
-                # Set random incubation time (1-5 days)
                 self.state.incubation_timer[i] = np.random.randint(1, 6)
                 new_infections += 1
         
@@ -208,11 +300,11 @@ class EpidemicSimulator:
         return new_infections
     
     def _update_mortality(self):
-        """Handles I→R and I→D with variable timing"""
+        """Handle I→R and I→D transitions"""
         I_nodes = np.where(self.state.disease_states == 'I')[0]
         
         if len(I_nodes) == 0:
-            return 0, 0 # Return 0 for both deaths and recoveries
+            return 0, 0
         
         deaths_today = 0
         recoveries_today = 0
@@ -220,66 +312,60 @@ class EpidemicSimulator:
         for i in I_nodes:
             self.state.infection_timer[i] -= 1
             
-            # Check if infectious period is complete
             if self.state.infection_timer[i] <= 0:
-                # Mortality check
                 if np.random.rand() < self.mortality_rate:
-                    # I → D (Death)
+                    # Death
                     self.state.disease_states[i] = 'D'
-                    self.state.awareness_states[i] = 'R'  # Removed from both layers
+                    self.state.awareness_states[i] = 'R'  # Removed
                     deaths_today += 1
                 else:
-                    # I → R (Recovery)
+                    # Recovery
                     self.state.disease_states[i] = 'R'
                     recoveries_today += 1
                 
-                # Reset timer
                 self.state.infection_timer[i] = 0
-            
+        
         self.cumulative_deaths += deaths_today
         return deaths_today, recoveries_today
     
+    # ==========================================================================
+    # AWARENESS DYNAMICS
+    # ==========================================================================
+    
     def _update_awareness_spread(self):
-        """Handles U→A (awareness) and A→U (forgetting) with 2-simplex effects"""
+        """Handle U→A (awareness spread) and A→U (forgetting)"""
         
-        # === 1. A → U (Forgetting) ===
+        # === A → U (Forgetting) ===
         A_nodes = np.where(self.state.awareness_states == 'A')[0]
         
         for i in A_nodes:
-            # Only living nodes can forget
-            if self.state.disease_states[i] != 'D':
+            if self.state.disease_states[i] != 'D':  # Only living can forget
                 if np.random.rand() < self.delta:
                     self.state.awareness_states[i] = 'U'
         
-        # === 2. U → A (Awareness Spread) ===
+        # === U → A (Awareness spread) ===
         U_nodes = np.where(self.state.awareness_states == 'U')[0]
         
         for i in U_nodes:
-            # Skip dead nodes
-            if self.state.disease_states[i] == 'D':
+            if self.state.disease_states[i] == 'D':  # Skip dead
                 continue
             
             became_aware = False
             
-            # 2a. 1-Simplex (Pairwise) Transmission
+            # 1-Simplex (pairwise) transmission
             A_neighbors = [j for j in self.adj_info[i] 
-                           if self.state.awareness_states[j] == 'A']
+                          if self.state.awareness_states[j] == 'A']
             
             if A_neighbors:
-                # Probability of NOT being informed by any neighbor
                 prob_not_informed = (1 - self.lambda_u) ** len(A_neighbors)
-                
                 if np.random.rand() > prob_not_informed:
                     became_aware = True
             
-            # 2b. 2-Simplex (Group) Transmission
+            # 2-Simplex (group) transmission
             if not became_aware and self.lambda_star > 0:
-                # Check triangles where BOTH other nodes are aware
                 for j, k in self.adj_triangles[i]:
                     if (self.state.awareness_states[j] == 'A' and 
                         self.state.awareness_states[k] == 'A'):
-                        
-                        # Group consensus effect
                         if np.random.rand() < self.lambda_star:
                             became_aware = True
                             break
@@ -287,35 +373,34 @@ class EpidemicSimulator:
             if became_aware:
                 self.state.awareness_states[i] = 'A'
     
-    def step(self, action=0):
+    # ==========================================================================
+    # SIMULATION STEP
+    # ==========================================================================
+    
+    def step(self, action):
         """Execute one simulation day"""
         self.day += 1
         self.current_lockdown_level = action
         transmission_multiplier = self.lockdown_multipliers[action]
         
-        R_nodes = np.where(self.state.disease_states == 'R')[0]
-        waning_rate = 0.007  # chance per day to lose immunity
+        # 1. Waning immunity
+        self._update_waning_immunity()
         
-        for i in R_nodes:
-            if np.random.rand() < waning_rate:
-                self.state.disease_states[i] = 'S'  # Back to susceptible
-
-        # 1. Awareness dynamics (information layer)
+        # 2. Awareness dynamics
         self._update_awareness_spread()
         
-        # 2. Disease spread (physical layer)
+        # 3. Disease spread
         new_infections = self._update_disease_spread(transmission_multiplier)
         
-        # 3. Recovery and mortality
+        # 4. Recovery and mortality
         deaths_today, recoveries_today = self._update_mortality()
         
-        # 4. Update counts
+        # 5. Update counts
         self.state.update_counts()
         
-        # 5. Calculate R_eff (effective reproduction number)
+        # 6. Calculate R_eff
         S_count = self.state.counts['S']
         if S_count > 0:
-            # Weighted average beta
             AS_count = self.state.counts['AS']
             US_count = self.state.counts['US']
             
@@ -327,13 +412,14 @@ class EpidemicSimulator:
             beta_avg = 0
             R_eff = 0
         
-        # 6. Calculate economy (adjusted for workforce)
-        base_economy = self.economy_levels[action]
-        workforce_alive = (self.N - self.state.counts['D'] - self.state.counts['I']) / self.N
-        adjusted_economy = base_economy * workforce_alive
+        # 7. Calculate economy
+        lockdown_capacity = self.economy_levels[action]
+        workforce_available = self.N - self.state.counts['D'] - self.state.counts['I']
+        adjusted_economy = lockdown_capacity * workforce_available / self.N
         
-        # 7. Record statistics
+        # 8. Record statistics
         stats = {
+            # Metadata
             'day': self.day,
             'action': action,
             'lockdown_level': action,
@@ -346,7 +432,7 @@ class EpidemicSimulator:
             'D': self.state.counts['D'],
             
             # Key metrics
-            'Active': self.state.counts['I'], # Active = Infectious only
+            'Active': self.state.counts['I'],
             'Total_Ever_Infected': (self.state.counts['E'] + self.state.counts['I'] + 
                                    self.state.counts['R'] + self.state.counts['D']),
             'new_infections': new_infections,
@@ -361,16 +447,16 @@ class EpidemicSimulator:
             # Combined states
             'AS': self.state.counts['AS'],
             'US': self.state.counts['US'],
-            'AI': self.state.counts.get('AI', 0),
+            'AI': self.state.counts['AI'],
             
             # Epidemiological metrics
             'R_eff': R_eff,
             'beta_avg': beta_avg,
             
             # Economic
-            'base_economy': base_economy,
+            'base_economy': lockdown_capacity,
             'adjusted_economy': adjusted_economy,
-            'workforce_alive': workforce_alive,
+            'workforce_available': workforce_available,
             'transmission_multiplier': transmission_multiplier,
             
             # Cumulative
@@ -380,7 +466,7 @@ class EpidemicSimulator:
         
         self.history.append(stats)
         
-        # Check if epidemic has ended
+        # Check termination
         done = (self.state.counts['I'] == 0 and self.state.counts['E'] == 0)
         
         return stats, done
@@ -394,34 +480,30 @@ class EpidemicSimulator:
         self.cumulative_infections = 0
         self.current_lockdown_level = 0
         
-        # Take first step (Day 1)
         initial_stats, _ = self.step(action=0)
         return initial_stats
     
+    # ==========================================================================
+    # UTILITY METHODS
+    # ==========================================================================
+    
     def get_reward(self, stats):
-        """
-        Calculate RL reward (Ohi et al. structure)
-        R(t) = Adjusted_Economy_t × e^(-8×Active_norm) - 5 × NewDeaths_t
-        """
+        """Calculate RL reward (Ohi et al. structure)"""
         Active_norm = stats['Active'] / self.N
         Deaths_today = stats['new_deaths']
         Economy_t = stats['adjusted_economy']
         
         reward = Economy_t * np.exp(-8 * Active_norm) - 5 * Deaths_today
-        
         return reward
     
     def get_state_vector(self, stats):
-        """
-        Extract normalized state vector for RL agent
-        [active_cases, new_infections, deaths, recoveries, R_eff, rho_A, economy]
-        """
+        """Extract normalized state vector for RL agent"""
         state_vec = np.array([
             stats['Active'] / self.N,
             stats['new_infections'] / self.N,
             stats['D'] / self.N,
             stats['R'] / self.N,
-            min(stats['R_eff'] / 5.0, 1.0),  # Normalize R_eff by max=5
+            min(stats['R_eff'] / 5.0, 1.0),
             stats['rho_A'],
             stats['adjusted_economy']
         ], dtype=np.float32)
@@ -451,8 +533,7 @@ def visualize_simulation(df, save_path='results/epidemic_simulation.png'):
     print(f"{'='*60}")
     
     fig, axes = plt.subplots(3, 3, figsize=(20, 15))
-    fig.suptitle('Epidemic Simulation Results (No Lockdown Baseline)', 
-                 fontsize=16, fontweight='bold')
+    fig.suptitle('Epidemic Simulation Results', fontsize=16, fontweight='bold')
     
     days = df['day']
     
@@ -572,12 +653,14 @@ def visualize_simulation(df, save_path='results/epidemic_simulation.png'):
 
 def print_summary_statistics(df, N):
     """Print comprehensive summary of simulation results"""
-    print("Simulation Stats")
+    print(f"\n{'='*60}")
+    print("SIMULATION SUMMARY STATISTICS")
+    print(f"{'='*60}")
     
     total_ever_infected = df['Total_Ever_Infected'].max()
     total_deaths = df['D'].max()
     
-    print("Disease Outcomes:")
+    print("\nDisease Outcomes:")
     print(f"  • Total simulation days: {len(df)}")
     print(f"  • Peak active cases (I): {df['Active'].max()} ({df['Active'].max()/N*100:.1f}%)")
     print(f"  • Peak day: {df['Active'].idxmax()}")
@@ -602,93 +685,94 @@ def print_summary_statistics(df, N):
     print(f"\nEconomic Impact:")
     print(f"  • Average economic activity: {df['adjusted_economy'].mean():.2f}")
     print(f"  • Final economic capacity: {df['adjusted_economy'].iloc[-1]:.2f}")
-    print(f"  • Economic loss from deaths: {(1 - df['workforce_alive'].iloc[-1]) * 100:.1f}%")
+    print(f"  • Economic loss from workforce: {(1 - df['workforce_available'].iloc[-1]/df['workforce_available'].iloc[0]) * 100:.1f}%")
     
     print(f"\n{'='*60}\n")
 
 
-def run_simulation(network_data, params, max_days=365):
+# ==============================================================================
+# SIMULATION RUNNER
+# ==============================================================================
+
+def run_simulation(network_data, scenario_name='realistic', max_days=365):
     """
-    Run a baseline simulation with no lockdown
-    """
+    Run epidemic simulation with specified scenario
     
+    Args:
+        network_data: Network structure from pickle file
+        scenario_name: Name of scenario from SimulationParams.SCENARIOS
+        max_days: Maximum simulation days
+    """
+    # Get parameters for scenario
+    params = SimulationParams.get_scenario(scenario_name)
+    lockdown_action = params.get('lockdown_action', 0)
+    
+    # Initialize simulator
     simulator = EpidemicSimulator(network_data, params)
     current_stats = simulator.reset()
     
-    print("Starting simulation...")
-    print(f"{'Day':<6} {'Active(I)':<10} {'New_Inf':<10} {'Deaths(D)':<10} {'R_eff':<8} {'ρ_A':<8} {'Adj_Econ':<10}")
+    print(f"\nStarting '{scenario_name}' simulation...")
+    print(f"Lockdown policy: Level {lockdown_action}")
+    print(f"\n{'Day':<6} {'Active(I)':<10} {'New_Inf':<10} {'Deaths(D)':<10} {'R_eff':<8} {'ρ_A':<8} {'Adj_Econ':<10}")
     print("-" * 72)
-
-    # Simulation loop
+    
+    # Run simulation
     done = False
     for day in range(2, max_days + 1):
         if done:
-            print(f"Simulation ended early on day {day-1}. Disease contained.")
+            print(f"\nSimulation ended early on day {day-1}. Disease contained.")
             break
-            
-        # Action 0: No lockdown
-        action = 0 
         
-        current_stats, done = simulator.step(action)
-        reward = simulator.get_reward(current_stats)
+        current_stats, done = simulator.step(action=lockdown_action)
         
+        # Print progress every 25 days
         if day % 25 == 0 or day == 2:
-            print(f"{day:<6} {current_stats['Active']:<10} {current_stats['new_infections']:<10} {current_stats['D']:<10} {current_stats['R_eff']:<8.2f} {current_stats['rho_A']:<8.2f} {current_stats['adjusted_economy']:<10.2f}")            
+            print(f"{day:<6} "
+                  f"{current_stats['Active']:<10} "
+                  f"{current_stats['new_infections']:<10} "
+                  f"{current_stats['D']:<10} "
+                  f"{current_stats['R_eff']:<8.2f} "
+                  f"{current_stats['rho_A']:<8.2f} "
+                  f"{current_stats['adjusted_economy']:<10.2f}")
     
-    # save results
-    df = simulator.save_results(filepath='results/simulation_baseline_output.csv')
+    # Save and visualize results
+    df = simulator.save_results(filepath=f'results/simulation_{scenario_name}_output.csv')
     print_summary_statistics(df, simulator.N)
-    visualize_simulation(df, save_path='results/epidemic_simulation_baseline.png')
+    visualize_simulation(df, save_path=f'results/epidemic_simulation_{scenario_name}.png')
+    
+    return simulator, df
 
 
+# ==============================================================================
+# MAIN EXECUTION
+# ==============================================================================
 
-def main():    
+def main():
+    """Main execution function"""
+    
+    # Load network
+    print("Loading network data...")
     with open('networks/multilayer_network.pkl', 'rb') as f:
-            network_data = pickle.load(f)
-    print("Network data loaded successfully.")
+        network_data = pickle.load(f)
+    print(f"✓ Network loaded: {network_data['N']} nodes\n")
+    
+    # Run simulation with specified scenario
+    scenario = 'long_duration'  # Options: 'extreme', 'realistic', 'long_duration'
+    max_days = 720
+    
+    simulator, df = run_simulation(
+        network_data=network_data,
+        scenario_name=scenario,
+        max_days=max_days
+    )
+    
+    print("\n" + "="*60)
+    print("SIMULATION COMPLETE")
+    print("="*60)
+    print(f"Final statistics saved to: results/simulation_{scenario}_output.csv")
+    print(f"Visualizations saved to: results/epidemic_simulation_{scenario}.png")
+    print("="*60 + "\n")
 
-    # --- 2. Define Parameters for SEVERE BASELINE ---
-    # These parameters ensure the non-lockdown policy performs poorly.
-    scenarios = {
-        'extreme': {
-            'beta0': 1.0,           # Base infection rate 
-            'mu': 0.1,              # E -> I incubation rate - SLOW INCUBATION
-            'gamma_r': 1/40,        # I -> R recovery rate (1/40 days) - SLOW RECOVERY
-            'mortality_rate': 0.5,  # I -> D death probability - HIGH MORTALITY
-            'gamma_a': 0.,         # how awareness affects infection (lower val --> lower infec chance)
-            'lambda_u': 0.1,        # probability of U->A based on pairwise interaction
-            'lambda_delta': 0.25,   # probability of U->A based on 2-simplex interaction
-            'delta': 0.7            # chance of forgetting awareness (A->U)
-        },
-        'realistic': {
-            'beta0': 0.10,          
-            'mu': 0.2,              
-            'gamma_r': 1/10,        
-            'mortality_rate': 0.02, 
-            'gamma_a': 0.3,         
-            'lambda_u': 0.2,       
-            'lambda_delta': 0.4,    
-            'delta': 0.6          
-        },
-        'long_duration': {
-            'beta0': 0.04,           # LOWER transmission (was 0.10)
-            'mu': 0.1,              # SLOWER incubation: E→I (was 0.2)
-            'gamma_r': 1/14,         # SLOWER recovery: ~18 days (was 1/10)
-            'mortality_rate': 0.0165,  # LOWER mortality (was 0.02)
-            'gamma_a': 0.7,          # STRONGER awareness protection (was 0.3)
-            'lambda_u': 0.15,        # MODERATE pairwise awareness spread (was 0.2)
-            'lambda_delta': 0.25,     # MODERATE group awareness (was 0.4)
-            'delta': 0.35             # SLOWER forgetting (was 0.6)
-        }
-    }
-    # Based on the proposal:
-    sim_params = scenarios['long_duration']
-    
-    # --- 3. Run Baseline Simulation ---
-    run_simulation(network_data, sim_params, max_days=1000)
-    
 
 if __name__ == "__main__":
     main()
-    
-    
