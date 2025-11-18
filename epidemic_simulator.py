@@ -52,7 +52,7 @@ class NodeState:
         initial_aware = np.random.choice(N, max(1, int(N * 0.01)), replace=False)
         self.awareness_states[initial_aware] = 'A'
         
-        # Seed 15 exposed
+        # Start with 15 exposed
         unaware = np.where(self.awareness_states == 'U')[0]
         seeds = np.random.choice(unaware, min(15, len(unaware)), replace=False)
         self.disease_states[seeds] = 'E'
@@ -116,7 +116,7 @@ class EpidemicSimulator:
         self.adj_info = network_data['adjacency_list_info']
         self.adj_triangles = network_data['adjacency_triangles_list']
         
-        # Calculate λ*
+        # Calculate lambda_star
         total_triangles = len(network_data.get('simplices_2', []))
         k2_avg = 3 * total_triangles / self.N
         self.lambda_star = self.lambda_delta * self.delta / k2_avg if k2_avg > 0 else 0
