@@ -285,6 +285,49 @@ class EpidemicSimulator:
         initial_stats, _ = self.step(action=0)
         return initial_stats
     
+    def get_state_vector(self, stats):
+        """
+        Extract normalized state vector for RL agent.
+        
+        Args:
+            stats (dict): Current statistics dictionary
+            
+        Returns:
+            np.array: Normalized state vector [7 features]
+                [active_cases, new_infections, deaths, recoveries, R_eff, rho_A, economy]
+        """
+        state_vec = np.array([
+            stats['Active'] / self.N,                    # Active cases (normalized)
+            stats['new_infections'] / self.N,            # New infections (normalized)
+            stats['D'] / self.N,                         # Deaths (normalized)
+            stats['R'] / self.N,                         # Recoveries (normalized)
+            min(stats['R_eff'] / 5.0, 1.0),             # R_eff (capped at 5)
+            stats['rho_A'],                              # Awareness density (already 0-1)
+            stats['adjusted_economy']                     # Economy (already 0-1)
+        ], dtype=np.float32)
+        
+        return state_vec
+    
+    def get_reward(self, stats):
+        """
+        Calculate RL reward (Ohi et al. structure).
+        
+        Formula: R(t) = Economy(t) × exp(-8 × Active(t)/N) - 5 × Deaths(t)
+        
+        Args:
+            stats (dict): Current statistics dictionary
+            
+        Returns:
+            float: Reward value
+        """
+        Active_norm = stats['Active'] / self.N
+        Deaths_today = stats['new_deaths']
+        Economy_t = stats['adjusted_economy']
+        
+        reward = Economy_t * np.exp(-8 * Active_norm) - 5 * Deaths_today
+        
+        return reward
+    
     def get_history_df(self):
         return pd.DataFrame(self.history)
 
