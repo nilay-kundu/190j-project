@@ -10,17 +10,19 @@ from collections import defaultdict
 
 sns.set_style("whitegrid")
 
+
 class MetricsTracker:
     """
     Tracks and stores training metrics over episodes.
     
     Stores:
-    - Episode metrics (reward, deaths, infections)
+    - Episode metrics (reward, deaths, infections, etc.)
     - Evaluation metrics (periodic assessments)
     - Training statistics (losses, epsilon, etc.)
     """
     
     def __init__(self):
+        """Initialize metrics tracker."""
         self.episode_metrics = defaultdict(list)
         self.evaluation_metrics = defaultdict(list)
         self.evaluation_episodes = []
@@ -87,16 +89,31 @@ class MetricsTracker:
         Args:
             filepath (str): Path to save JSON
         """
+        # Convert numpy types to native Python types for JSON serialization
+        def convert_to_native(obj):
+            """Convert numpy types to native Python types."""
+            if isinstance(obj, np.integer):
+                return int(obj)
+            elif isinstance(obj, np.floating):
+                return float(obj)
+            elif isinstance(obj, np.ndarray):
+                return obj.tolist()
+            elif isinstance(obj, list):
+                return [convert_to_native(item) for item in obj]
+            elif isinstance(obj, dict):
+                return {k: convert_to_native(v) for k, v in obj.items()}
+            return obj
+        
         data = {
-            'episode_metrics': {k: list(v) for k, v in self.episode_metrics.items()},
-            'evaluation_metrics': {k: list(v) for k, v in self.evaluation_metrics.items()},
-            'evaluation_episodes': self.evaluation_episodes
+            'episode_metrics': {k: convert_to_native(list(v)) for k, v in self.episode_metrics.items()},
+            'evaluation_metrics': {k: convert_to_native(list(v)) for k, v in self.evaluation_metrics.items()},
+            'evaluation_episodes': convert_to_native(self.evaluation_episodes)
         }
         
         with open(filepath, 'w') as f:
             json.dump(data, f, indent=2)
         
-        print(f"Metrics saved to: {filepath}")
+        print(f"✓ Metrics saved to: {filepath}")
     
     def load(self, filepath):
         """
@@ -112,7 +129,7 @@ class MetricsTracker:
         self.evaluation_metrics = defaultdict(list, data['evaluation_metrics'])
         self.evaluation_episodes = data['evaluation_episodes']
         
-        print(f"Metrics loaded from: {filepath}")
+        print(f"✓ Metrics loaded from: {filepath}")
 
 
 def smooth_curve(values, window=10):
@@ -290,7 +307,7 @@ def plot_training_curves(metrics_tracker, save_path=None):
     
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        print(f"Training curves saved to: {save_path}")
+        print(f"✓ Training curves saved to: {save_path}")
     
     plt.show()
 
@@ -308,7 +325,8 @@ def create_summary_table(metrics_tracker):
     summary = {}
     
     # Episode metrics
-    for metric in ['episode_reward', 'total_deaths', 'total_infections', 'peak_active', 'episode_length']:
+    for metric in ['episode_reward', 'total_deaths', 'total_infections', 
+                   'peak_active', 'episode_length']:
         values = metrics_tracker.get_metric(metric)
         if values:
             summary[f'{metric}_mean'] = np.mean(values)
@@ -325,10 +343,12 @@ def create_summary_table(metrics_tracker):
         for metric in ['eval_avg_reward', 'eval_avg_deaths', 'eval_avg_infections']:
             values = metrics_tracker.evaluation_metrics.get(metric, [])
             if values:
-                summary[f'{metric}_best'] = (np.max(values) if 'reward' in metric else np.min(values))
+                summary[f'{metric}_best'] = (np.max(values) if 'reward' in metric 
+                                            else np.min(values))
                 summary[f'{metric}_final'] = values[-1]
     
     return summary
+
 
 def print_summary(metrics_tracker):
     """
