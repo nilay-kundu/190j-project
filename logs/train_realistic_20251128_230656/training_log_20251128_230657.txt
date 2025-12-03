@@ -1,0 +1,25 @@
+[2025-11-28 23:06:57] Logger initialized: train_realistic_20251128_230656
+[2025-11-28 23:06:57] Log file: logs/train_realistic_20251128_230656/training_log_20251128_230657.txt
+[2025-11-28 23:06:57] TensorBoard logs: logs/train_realistic_20251128_230656/tensorboard
+[2025-11-28 23:06:57] View with: tensorboard --logdir logs/train_realistic_20251128_230656/tensorboard
+[2025-11-28 23:06:57] ============================================================
+[2025-11-28 23:06:57] TRAINING STARTED: train_realistic_20251128_230656
+[2025-11-28 23:06:57] ============================================================
+[2025-11-28 23:06:57] Scenario: realistic
+[2025-11-28 23:06:57] Total Episodes: 10
+[2025-11-28 23:06:57] Curriculum Learning: False
+[2025-11-28 23:06:57] Device: cpu
+[2025-11-28 23:06:57] ============================================================
+[2025-11-28 23:08:44] [Episode 10] Reward: 49.58, Deaths: 16.6, ε: 0.9511, Loss: 1.7182
+[2025-11-28 23:08:44] 
+============================================================
+[2025-11-28 23:08:44] TRAINING COMPLETE
+[2025-11-28 23:08:44] ============================================================
+[2025-11-28 23:08:44] Total Time: 0.03 hours
+[2025-11-28 23:08:44] Best Reward: -inf
+[2025-11-28 23:08:44] Best Deaths: inf
+[2025-11-28 23:08:44] ============================================================
+[2025-11-28 23:08:44] Final model saved to: checkpoints/final_model.pth
+[2025-11-28 23:08:44] Metrics saved to: logs/training_metrics.json
+[2025-11-28 23:09:35] Training curves saved to: logs/training_curves.png
+[2025-11-28 23:09:35] Logger closed
