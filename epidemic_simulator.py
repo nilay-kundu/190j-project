@@ -38,10 +38,6 @@ LOCKDOWN_MULTIPLIERS = {0: 1.0, 1: 0.65, 2: 0.4}
 ECONOMY_LEVELS = {0: 1.0, 1: 0.65, 2: 0.4}
 
 
-# ==============================================================================
-# NODE STATE
-# ==============================================================================
-
 class NodeState:
     def __init__(self, N):
         self.N = N
@@ -84,9 +80,6 @@ class NodeState:
         self.counts['Aware_Density'] = self.counts['A'] / self.N
 
 
-# ==============================================================================
-# EPIDEMIC SIMULATOR
-# ==============================================================================
 
 class EpidemicSimulator:
     def __init__(self, network_data, params):
@@ -128,13 +121,13 @@ class EpidemicSimulator:
         self.cumulative_deaths = 0
         self.cumulative_infections = 0
     
-    def _update_waning_immunity(self):
+    def update_waning_immunity(self):
         R_nodes = np.where(self.state.disease_states == 'R')[0]
         for i in R_nodes:
             if np.random.rand() < self.waning_rate:
                 self.state.disease_states[i] = 'S'
     
-    def _update_disease_spread(self, transmission_multiplier):
+    def update_disease_spread(self, transmission_multiplier):
         new_infections = 0
         
         # E → I
@@ -170,7 +163,7 @@ class EpidemicSimulator:
         self.cumulative_infections += new_infections
         return new_infections
     
-    def _update_mortality(self):
+    def update_mortality(self):
         I_nodes = np.where(self.state.disease_states == 'I')[0]
         if len(I_nodes) == 0:
             return 0, 0
@@ -191,7 +184,7 @@ class EpidemicSimulator:
         self.cumulative_deaths += deaths_today
         return deaths_today, recoveries_today
     
-    def _update_awareness_spread(self):
+    def update_awareness_spread(self):
         # A → U (Forgetting)
         A_nodes = np.where(self.state.awareness_states == 'A')[0]
         for i in A_nodes:
@@ -230,10 +223,10 @@ class EpidemicSimulator:
         self.current_lockdown_level = action
         transmission_multiplier = self.lockdown_multipliers[action]
         
-        self._update_waning_immunity()
-        self._update_awareness_spread()
-        new_infections = self._update_disease_spread(transmission_multiplier)
-        deaths_today, recoveries_today = self._update_mortality()
+        self.update_waning_immunity()
+        self.update_awareness_spread()
+        new_infections = self.update_disease_spread(transmission_multiplier)
+        deaths_today, recoveries_today = self.update_mortality()
         self.state.update_counts()
         
         # Calculate R_eff
@@ -288,13 +281,7 @@ class EpidemicSimulator:
     def get_state_vector(self, stats):
         """
         Extract normalized state vector for RL agent.
-        
-        Args:
-            stats (dict): Current statistics dictionary
-            
-        Returns:
-            np.array: Normalized state vector [7 features]
-                [active_cases, new_infections, deaths, recoveries, R_eff, rho_A, economy]
+        [active_cases, new_infections, deaths, recoveries, R_eff, rho_A, economy]
         """
         state_vec = np.array([
             stats['Active'] / self.N,                    # Active cases (normalized)
@@ -309,17 +296,6 @@ class EpidemicSimulator:
         return state_vec
     
     def get_reward(self, stats):
-        """
-        Calculate RL reward (Ohi et al. structure).
-        
-        Formula: R(t) = Economy(t) × exp(-8 × Active(t)/N) - 5 × Deaths(t)
-        
-        Args:
-            stats (dict): Current statistics dictionary
-            
-        Returns:
-            float: Reward value
-        """
         Active_norm = stats['Active'] / self.N
         Deaths_today = stats['new_deaths']
         Economy_t = stats['adjusted_economy']
@@ -332,10 +308,7 @@ class EpidemicSimulator:
         return pd.DataFrame(self.history)
 
 
-# ==============================================================================
 # VISUALIZATION
-# ==============================================================================
-
 def visualize_simulation(df, save_path):
     fig, axes = plt.subplots(2, 3, figsize=(18, 12))
     fig.suptitle('Epidemic Simulation Results', fontsize=16, fontweight='bold')
@@ -407,9 +380,6 @@ def visualize_simulation(df, save_path):
     plt.close()
 
 
-# ==============================================================================
-# RUNNER
-# ==============================================================================
 
 def run_simulation(network_data, scenario_name='realistic', max_days=365):
     params = SCENARIOS[scenario_name].copy()
@@ -454,9 +424,6 @@ def run_simulation(network_data, scenario_name='realistic', max_days=365):
     return simulator, df
 
 
-# ==============================================================================
-# MAIN
-# ==============================================================================
 
 def main():
     with open('networks/multilayer_network.pkl', 'rb') as f:

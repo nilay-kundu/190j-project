@@ -1,5 +1,5 @@
 """
-Step 1: Network Construction
+Network Construction
 Creates multilayer simplicial complex network
 """
 
@@ -32,11 +32,11 @@ class MultiLayerSimplicialNetwork:
         print("Building Multilayer Network")
         print("="*20)
         
-        self._build_physical_layer()
-        self._build_information_layer()
-        self._compute_statistics()
+        self.build_physical_layer()
+        self.build_information_layer()
+        self.compute_statistics()
         
-    def _build_physical_layer(self):
+    def build_physical_layer(self):
         """Build ER random graph for disease transmission"""
         print(f"\n===== [1/2] Building Physical Layer =====")
         print(f"  Erdos-Renyi random graph")
@@ -52,7 +52,7 @@ class MultiLayerSimplicialNetwork:
         print(f"    - Edges: {num_edges}")
         print(f"    - Average degree: {avg_degree:.2f}")
         
-    def _build_information_layer(self):
+    def build_information_layer(self):
         """Build simplicial complex for awareness layer"""
         print(f"\n===== [2/2] Building Information Layer =====")
         print(f"  Type: Random simplicial complex")
@@ -106,7 +106,7 @@ class MultiLayerSimplicialNetwork:
         print(f"     Actual average degree: {final_avg_degree:.2f} (target: {self.k1})")
         print(f"     Actual 2-simplices per node: {simplices_per_node:.2f} (target: {self.k2})")
         
-    def _compute_statistics(self):
+    def compute_statistics(self):
         """Compute and display network statistics"""
         print(f"\n" + "="*20)
         print("Network Stats")
